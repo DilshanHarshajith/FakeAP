@@ -269,11 +269,6 @@ configure_hostapd() {
 
         if [ "$ans2" = "y" ]; then
             read -p "Password (min 8 chars): " pwd
-            # Check password length
-            while [ ${#pwd} -lt 8 ]; do
-                echo "Error: Password must be at least 8 characters."
-                read -p "Password (min 8 chars): " pwd
-            done
             HostapdCode+="\nwpa=2\nwpa_passphrase=$pwd\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=TKIP\nrsn_pairwise=CCMP"
         else
             HostapdCode+="\nwpa_pairwise=TKIP\nrsn_pairwise=CCMP"
@@ -308,30 +303,8 @@ configure_udhcpd() {
     u_ans=${u_ans:-1}
 
     if [ "$u_ans" = "2" ]; then
-        # First display subnet options
-        echo -e "\nAvailable IP subnets (192.168.X.0):"
-        subnets=("10 (Default)" "20" "30" "50" "100" "200")
-        
-        for ((i=0; i<${#subnets[@]}; i++)); do
-            echo "[$((i+1))] ${subnets[i]}"
-        done
-        
-        # Then ask for selection
-        local valid=false
-        local selection
-        
-        while [ "$valid" = false ]; do
-            read -p "Enter subnet selection (1-${#subnets[@]}) [1]: " selection
-            selection=${selection:-1}
-            if [[ "$selection" =~ ^[0-9]+$ ]] && [ "$selection" -ge 1 ] && [ "$selection" -le "${#subnets[@]}" ]; then
-                valid=true
-            else
-                echo "Invalid selection. Please enter a number between 1 and ${#subnets[@]}."
-            fi
-        done
-        
-        selected_subnet="${subnets[$((selection-1))]}"
-        oct=$(echo $selected_subnet | cut -d' ' -f1)
+        read -p "Enter subnet: " subnet
+        oct=$(echo $subnet | cut -d' ' -f1)
         
         # First display DNS options
         echo -e "\nAvailable DNS servers:"
@@ -443,52 +416,68 @@ configure_internet_sharing() {
 
 # Function to configure DNS Spoofing
 configure_dns_spoofing() {
-    echo -e "\n=== DNS Spoofing Configuration ==="
-    echo "DNS spoofing redirects specific domain requests to your specified IP address."
-    echo
+  echo -e "\n=== DNS Spoofing Configuration ==="
+  echo "DNS spoofing redirects specific domain requests to your specified IP address."
+  echo
+  # Display options first
+  echo "Select option:"
+  echo "[1] No DNS spoofing"
+  echo "[2] Enable DNS spoofing"
+  # Then ask for input
+  read -p "Enter selection (1-2) [1]: " dns_choice
+  dns_choice=${dns_choice:-1}
+  
+  if [[ $dns_choice == "2" ]]; then
+    echo "Using local DNS server (dnsmasq) for DNS spoofing"
+    sed -i "/opt dns/c opt dns 192.168.${oct}.1" Config/dnsmasq.conf
     
-    # Display options first
-    echo "Select option:"
-    echo "[1] No DNS spoofing"
-    echo "[2] Enable DNS spoofing"
-    
-    # Then ask for input
-    read -p "Enter selection (1-2) [1]: " dns_choice
-    dns_choice=${dns_choice:-1}
-    
-    if [[ $dns_choice == "2" ]]; then
-        echo "Using local DNS server (dnsmasq) for DNS spoofing"
-        sed -i "/opt dns/c opt dns 192.168.${oct}.1" Config/udhcpd.conf
+    # Check for existing configuration
+    if grep -q "address=" Config/dnsmasq.conf; then
+      echo -e "\nCurrent DNS spoofing configuration:"
+      grep "address=" Config/dnsmasq.conf
+      echo
+      read -p "Use this configuration? (y/n) [y]: " use_existing
+      use_existing=${use_existing:-y}
+      
+      if [[ $use_existing != "y" ]]; then
+        # Create new configuration from scratch
+        echo "server=8.8.8.8" > Config/dnsmasq.conf
         
-        # Confirm if the user wants to use the existing domain spoofing or configure new ones
-        if grep -q "address=" Config/dnsmasq.conf; then
-            echo -e "\nCurrent DNS spoofing configuration:"
-            grep "address=" Config/dnsmasq.conf
-            echo
-            read -p "Use this configuration? (y/n) [y]: " use_existing
-            use_existing=${use_existing:-y}
-            
-            if [[ $use_existing != "y" ]]; then
-                read -p "Enter domain to spoof (e.g., .example.com): " spoof_domain
-                read -p "Enter IP address to redirect to: " spoof_ip
-                
-                # Update dnsmasq.conf
-                sed -i "/address=/c address=/${spoof_domain}/${spoof_ip}" Config/dnsmasq.conf
-            fi
-        else
-            read -p "Enter domain to spoof (e.g., .example.com): " spoof_domain
-            read -p "Enter IP address to redirect to: " spoof_ip
-            
-            # Update dnsmasq.conf
-            echo "server=8.8.8.8" > Config/dnsmasq.conf
-            echo "address=/${spoof_domain}/${spoof_ip}" >> Config/dnsmasq.conf
-        fi
-        
-        return 0
+        # Support multiple entries
+        echo "Enter domain and IP pairs for spoofing (enter '/' when finished)"
+        while true; do
+          read -p "Enter domain to spoof (e.g., .example.com) or '/' to finish: " spoof_domain
+          if [[ $spoof_domain == "/" ]]; then
+            break
+          fi
+          read -p "Enter IP address to redirect to: " spoof_ip
+          # Add to dnsmasq.conf
+          echo "address=/${spoof_domain}/${spoof_ip}" >> Config/dnsmasq.conf
+          echo "Added: ${spoof_domain} -> ${spoof_ip}"
+        done
+      fi
     else
-        echo "DNS spoofing disabled."
-        return 1
+      # No existing config, create new one
+      echo "server=8.8.8.8" > Config/dnsmasq.conf
+      
+      # Support multiple entries
+      echo "Enter domain and IP pairs for spoofing (enter '/' when finished)"
+      while true; do
+        read -p "Enter domain to spoof (e.g., .example.com) or '/' to finish: " spoof_domain
+        if [[ $spoof_domain == "/" ]]; then
+          break
+        fi
+        read -p "Enter IP address to redirect to: " spoof_ip
+        # Add to dnsmasq.conf
+        echo "address=/${spoof_domain}/${spoof_ip}" >> Config/dnsmasq.conf
+        echo "Added: ${spoof_domain} -> ${spoof_ip}"
+      done
     fi
+    return 0
+  else
+    echo "DNS spoofing disabled."
+    return 1
+  fi
 }
 
 # Function to configure packet capture
