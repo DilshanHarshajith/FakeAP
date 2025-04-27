@@ -268,7 +268,7 @@ configure_hostapd() {
         fi
 
         if [ "$ans2" = "y" ]; then
-            read -p "Password (min 8 chars): " pwd
+            read -p "Password : " pwd
             HostapdCode+="\nwpa=2\nwpa_passphrase=$pwd\nwpa_key_mgmt=WPA-PSK\nwpa_pairwise=TKIP\nrsn_pairwise=CCMP"
         else
             HostapdCode+="\nwpa_pairwise=TKIP\nrsn_pairwise=CCMP"
